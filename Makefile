@@ -1,0 +1,2 @@
+COMPONENT=SmartLightAppC
+include $(MAKERULES)
