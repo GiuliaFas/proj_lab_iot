@@ -1,5 +1,8 @@
 #include "Timer.h"
 #include "SmartLight.h"
+#include "printf.h"
+#include <stdio.h>
+#include <stdint.h>
  
 /**
  * Implementation of the SmartLight application. 
@@ -11,236 +14,237 @@
 **/
 
 module SmartLightC @safe() {
+
+
   uses {
-    interface Leds;
     interface Boot;
+    interface Leds;
     interface Receive;
     interface AMSend;
-    interface Timer<TMilli> as MilliTimer;
+    interface Timer<TMilli> as MilliTimer1;	//del node1 per inviare messaggi a tutti
+    interface Timer<TMilli> as MilliTimer2; //ciclo for spegnimento
+    interface Timer<TMilli> as MilliTimer3; //ciclo for path
+    interface Timer<TMilli> as MilliTimer4; //attesa
     interface SplitControl as AMControl;
     interface Packet;
     interface AMPacket;
   }
-}
+  }
+
 implementation {
 
   message_t packet;
-
-  bool locked; //busy
-  uint16_t a = 0;	//contatore per i cicli for broadcast
-  uint16_t i = 0;	//contatore per i cicli for unciast
-  uint16_t j = 0;	//contatore per i cicli for unicast
-  uint16_t k = 0;	//contatore per i cicli for unicast
-  uint16_t b = 0;	//contatore per i cicli for unicast
-  uint16_t counter = 0;
-  uint16_t counter_pat = 0;					//to choose the light's pattern 
-  uint16_t pat1[5] = {3,5,6,7,9};				//	->
-  uint16_t pat2[5] = {2,4,6,8,10};				//X
-  uint16_t pat3[5] = {2,5,6,7,8};				//T
   
-	//********************Boot Interface****************//
+  bool locked = FALSE; //busy
+  uint16_t pat1[5] = {2,6,8,4,10}; //X
+  uint16_t counter = 0;
+  uint16_t for1 = 1;
+  uint16_t for2 = 0;
+
+	//********Controller Task 1********//
+  void Msg_unicast_off(){ 	//messaggio dal node1 per spegnere tutti i nodi
+  if (!locked){
+  if (TOS_NODE_ID == 1){
+   	call MilliTimer2.startPeriodic(1500);
+	}
+  else {return;}
+  }
+  else {return;}
+  }
+  
+//********Controller Task 2********//
+  void Msg_unicast_on(){
+  	if (!locked){
+  	if (TOS_NODE_ID == 1){
+  		call MilliTimer3.startPeriodic(1500);
+		}
+	else {return;}	
+	}
+	else {return;}
+  }
+
+//********forward fuction********//
+  void forward(uint16_t d, uint16_t f){
+  	if (locked) {return;}
+  	else {
+  	uint16_t a = d;
+  	uint16_t b= f;
+    	smart_light_msg_t* msg = (smart_light_msg_t*)(call Packet.getPayload(&packet, sizeof(smart_light_msg_t)));
+    	printf("forward function: a=%d, b =%d\n",a,b);
+    	msg->nodeID = a;
+    	msg->flag_led = b;
+    	printf("forward function: nodeID=%d\n",msg->nodeID);
+  		if (call AMSend.send(TOS_NODE_ID+1, &packet, sizeof(smart_light_msg_t)) == SUCCESS) {
+  			printf("packet forwarded from %d to %d\n nodeID %d.\n",TOS_NODE_ID, TOS_NODE_ID+1, msg->nodeID);
+			locked = TRUE; }
+	}
+  }
+	
+
+	//*******Boot Interface*****//
   event void Boot.booted() {
-    dbg("Boot","Application booted for node (%d).\n",TOS_NODE_ID);
+    printf("Application booted for node (%d).\n",TOS_NODE_ID);
     call AMControl.start();
   }
-	//********************SplitControl Interface*************//
+	//*******SplitControl Interface****//
   event void AMControl.startDone(error_t err) {
     if (err == SUCCESS) {
-      dbg("Radio","Radio is on!\n");
-      call MilliTimer.startPeriodic(500);
+      printf("Radio is on!\n"); 
+      if (TOS_NODE_ID == 1){
+      call MilliTimer1.startPeriodic(20000);
+      }
     }
     else {
       call AMControl.start();
     }
-  }
+    }
 
   event void AMControl.stopDone(error_t err) {
     // do nothing
   }
   
-  
-  
-  //***********************Controller Task 1*************************//
-  void Msg_broadcast_1(){
-  smart_light_msg_t* msg = (smart_light_msg_t*)(call Packet.getPayload(&packet, sizeof(smart_light_msg_t)));
-  for (a=0; a<8; a++){ 	//per tutti i nodi luce
-  	if (msg == NULL) {
-      return;}
-    else{  	  
-  	msg->nodeID = a;
-  	msg->flag_led = 0;		//messaggio di tipo spegni
-  	  if (call AMSend.send(AM_BROADCAST_ADDR, &packet, sizeof(smart_light_msg_t)) == SUCCESS) {		//manda il messaggio
-	  dbg("SmartLightC", "SmartLightC: packet sent broadcast, with nodeID =%hhu.\n", msg->nodeID);
-	  locked = TRUE; 
-		}
-	}
-  }
-  }
-  //***********************Controller Task 2*************************//
-  void Msg_unicast_1(){
-  	if (!locked){
-  	b++;	//contatore per il ciclo dei pat
-    counter_pat++;	//anytime the timer is fired, change the pattern
-  	if (counter_pat == 1+6*b){		//pat: arrow
-  		for (i=0; i<4; i++){
-  			if (pat1[i] == 2 || pat1[i] == 3 || pat1[i] == 4){
-  			smart_light_msg_t* msg = (smart_light_msg_t*)(call Packet.getPayload(&packet, sizeof(smart_light_msg_t)));
-  			msg->nodeID = pat1[i]; //dai alla variabile nodeID nel paylod il valore del pat
-  			msg->flag_led = 1;		//messaggio di tipo accendi
-  				if (call AMSend.send(2, &packet, sizeof(smart_light_msg_t)) == SUCCESS) {		//manda il messaggio
-				dbg("SmartLightC", "SmartLightC: packet sent to node 2, with nodeID =%hhu.\n", msg->nodeID);
-				locked = TRUE; 
-				}
-			}	
-    		if (pat1[i] == 5 || pat1[i] == 6 || pat1[i] == 7){
-    		smart_light_msg_t* msg = (smart_light_msg_t*)(call Packet.getPayload(&packet, sizeof(smart_light_msg_t)));
-  			msg->nodeID = pat1[i]; //dai alla variabile nodeID nel paylod il valore del pat
-  			msg->flag_led = 1;		//messaggio di tipo accendi
-  				if (call AMSend.send(5, &packet, sizeof(smart_light_msg_t)) == SUCCESS) {		//manda il messaggio
-				dbg("SmartLightC", "SmartLightC: packet sent to node 5, with nodeID =%hhu.\n", msg->nodeID);
-				locked = TRUE; 
-				}
-			}	
-	    	if (pat1[i] == 8 || pat1[i] == 9 || pat1[i] == 10){
-	    	smart_light_msg_t* msg = (smart_light_msg_t*)(call Packet.getPayload(&packet, sizeof(smart_light_msg_t)));
-  			msg->nodeID = pat1[i]; //dai alla variabile nodeID nel paylod il valore del pat
-  			msg->flag_led = 1;		//messaggio di tipo accendi
-  				if (call AMSend.send(8, &packet, sizeof(smart_light_msg_t)) == SUCCESS) {		//manda il messaggio
-				dbg("SmartLightC", "SmartLightC: packet sent to node 8, with nodeID =%hhu.\n", msg->nodeID);
-				locked = TRUE; 
-				}
-			}
-		}	
-	}
-	if (counter_pat == 3+6*b){		//pat: X
-  		for (j=0; j<4; j++){
-  			if (pat2[j] == 2 || pat2[j] == 3 || pat2[j] == 4){
-  			smart_light_msg_t* msg = (smart_light_msg_t*)(call Packet.getPayload(&packet, sizeof(smart_light_msg_t)));
-  			msg->nodeID = pat1[i]; //dai alla variabile nodeID nel paylod il valore del pat
-  			msg->flag_led = 1;		//messaggio di tipo accendi
-  				if (call AMSend.send(2, &packet, sizeof(smart_light_msg_t)) == SUCCESS) {		//manda il messaggio
-				dbg("SmartLightC", "SmartLightC: packet sent to node 2, with nodeID =%hhu.\n", msg->nodeID);
-				locked = TRUE; 
-				}
-			}	
-    		if (pat2[j] == 5 || pat2[j] == 6 || pat2[j] == 7){
-    		smart_light_msg_t* msg = (smart_light_msg_t*)(call Packet.getPayload(&packet, sizeof(smart_light_msg_t)));
-  			msg->nodeID = pat1[i]; //dai alla variabile nodeID nel paylod il valore del pat
-  			msg->flag_led = 1;		//messaggio di tipo accendi
-  				if (call AMSend.send(5, &packet, sizeof(smart_light_msg_t)) == SUCCESS) {		//manda il messaggio
-				dbg("SmartLightC", "SmartLightC: packet sent to node 5, with nodeID =%hhu.\n", msg->nodeID);
-				locked = TRUE; 
-				}
-			}	
-	    	if (pat2[j] == 8 || pat2[j] == 9 || pat2[j] == 10){
-	    	smart_light_msg_t* msg = (smart_light_msg_t*)(call Packet.getPayload(&packet, sizeof(smart_light_msg_t)));
-  			msg->nodeID = pat1[i]; //dai alla variabile nodeID nel paylod il valore del pat
-  			msg->flag_led = 1;		//messaggio di tipo accendi
-  				if (call AMSend.send(8, &packet, sizeof(smart_light_msg_t)) == SUCCESS) {		//manda il messaggio
-				dbg("SmartLightC", "SmartLightC: packet sent to node 8, with nodeID =%hhu.\n", msg->nodeID);
-				locked = TRUE; 
-				}
-			}
-		}	
-	}
-	if (counter_pat == 5+6*b){		//pat: T
-  		for (k=0; k<4; k++){
-  			if (pat3[k] == 2 || pat3[k] == 3 || pat3[k] == 4){
-  			smart_light_msg_t* msg = (smart_light_msg_t*)(call Packet.getPayload(&packet, sizeof(smart_light_msg_t)));
-  			msg->nodeID = pat1[i]; //dai alla variabile nodeID nel paylod il valore del pat
-  			msg->flag_led = 1;		//messaggio di tipo accendi
-  				if (call AMSend.send(2, &packet, sizeof(smart_light_msg_t)) == SUCCESS) {		//manda il messaggio
-				dbg("SmartLightC", "SmartLightC: packet sent to node 2, with nodeID =%hhu.\n", msg->nodeID);
-				locked = TRUE; 
-				}
-			}	
-    		if (pat3[k] == 5 || pat3[k] == 6 || pat3[k] == 7){
-    		smart_light_msg_t* msg = (smart_light_msg_t*)(call Packet.getPayload(&packet, sizeof(smart_light_msg_t)));
-  			msg->nodeID = pat1[i]; //dai alla variabile nodeID nel paylod il valore del pat
-  			msg->flag_led = 1;		//messaggio di tipo accendi
-  				if (call AMSend.send(5, &packet, sizeof(smart_light_msg_t)) == SUCCESS) {		//manda il messaggio
-				dbg("SmartLightC", "SmartLightC: packet sent to node 5, with nodeID =%hhu.\n", msg->nodeID);
-				locked = TRUE; 
-				}
-			}	
-	    	if (pat3[k] == 8 || pat3[k] == 9 || pat3[k] == 10){
-	    	smart_light_msg_t* msg = (smart_light_msg_t*)(call Packet.getPayload(&packet, sizeof(smart_light_msg_t)));
-  			msg->nodeID = pat1[i]; //dai alla variabile nodeID nel paylod il valore del pat
-  			msg->flag_led = 1;		//messaggio di tipo accendi
-  				if (call AMSend.send(8, &packet, sizeof(smart_light_msg_t)) == SUCCESS) {		//manda il messaggio
-				dbg("SmartLightC", "SmartLightC: packet sent to node 8, with nodeID =%hhu.\n", msg->nodeID);
-				locked = TRUE; 
-				}
-			}
-		}	
-	}
-	}
-	}
-	
-	//************************MilliTimer Interface********************//
-  event void MilliTimer.fired() {
+  //*********MilliTimer1 Interface*******//
+  event void MilliTimer1.fired() {
+  if (locked) {
+  	return;}
     counter++;
-    dbg("SmartLightC", "SmartLightC: timer fired, counter is %hu.\n", counter);
+    printf("timer1 fired, counter is %d.\n", counter);
+      if (counter%2 != 0){
+      	Msg_unicast_on(); }	
+      if (counter%2 == 0){
+      	Msg_unicast_off(); } 
+      else 
+      	{return;}
+    }
+  
+  //*********MilliTimer2 Interface*******//
+  event void MilliTimer2.fired() { 	//ciclo for1 
+    printf("timer2 fired\n");
     if (locked) {
+    printf("timer2: locked");
       return; }
     else {
-      if (counter%2 != 0){
-      	Msg_unicast_1(); }	//ogni volta che scatta il timer a tempo dispari, chiama il controllore 
-      else{
-      	Msg_broadcast_1(); }
+    for1++;
+    printf("timer2: counter is %d.\n", for1);
+    	if(for1 == 2 || for1 == 3 || for1 == 4){	  //routing
+    		smart_light_msg_t* msg = (smart_light_msg_t*)(call Packet.getPayload(&packet, sizeof(smart_light_msg_t)));
+ 			msg->flag_led = 0; 		//messaggio di tipo spegni
+ 			msg->nodeID = for1;	
+  	 		if (call AMSend.send(2, &packet, sizeof(smart_light_msg_t)) == SUCCESS) {		//manda il messaggio
+			printf("packet sent to node 2, with nodeID =%d.\n", msg->nodeID);
+			locked = TRUE; 
+			}
+		}
+		if(for1 == 5 || for1 == 6 || for1 == 7){	//routing
+			smart_light_msg_t* msg = (smart_light_msg_t*)(call Packet.getPayload(&packet, sizeof(smart_light_msg_t)));
+ 			msg->flag_led = 0; 		//messaggio di tipo spegni
+ 			msg->nodeID = for1;
+  	  		if (call AMSend.send(5, &packet, sizeof(smart_light_msg_t)) == SUCCESS) {		//manda il messaggio
+			printf("packet sent to node 5, with nodeID =%d.\n", msg->nodeID);
+			locked = TRUE; 
+			}
+		}
+		if(for1 == 8 || for1 == 9 || for1 == 10){	//routing
+			smart_light_msg_t* msg = (smart_light_msg_t*)(call Packet.getPayload(&packet, sizeof(smart_light_msg_t)));
+ 			msg->flag_led = 0; 		//messaggio di tipo spegni
+ 			msg->nodeID = for1;
+  	  		if (call AMSend.send(8, &packet, sizeof(smart_light_msg_t)) == SUCCESS) {		//manda il messaggio
+			printf("packet sent to node 8, with nodeID =%d.\n", msg->nodeID);
+			locked = TRUE; 
+			}
+		}
+		if(for1 == 11){
+			for1 = 1;
+			call MilliTimer2.stop();
+		}
     }
   }
-	//***********************Receive Event Interface*************************//
+  
+  //*********MilliTimer3 Interface*******//
+  event void MilliTimer3.fired() { 	//ciclo for2 
+    
+    printf("timer3 fired\n");
+    if (locked) {
+    printf("timer2: locked");
+      return; }
+    else {
+    printf("timer3 fired, counter is %d.\n", for2);
+    printf("pat1[%d] is %d.\n", for2, pat1[for2]);
+    	if (pat1[for2] == 2 || pat1[for2] == 3 || pat1[for2] == 4){
+  			smart_light_msg_t* msg = (smart_light_msg_t*)(call Packet.getPayload(&packet, sizeof(smart_light_msg_t)));
+  			msg->nodeID = pat1[for2]; //dai alla variabile nodeID nel paylod il valore del pat
+  			msg->flag_led = 1;		//messaggio di tipo accendi
+  				if (call AMSend.send(2, &packet, sizeof(smart_light_msg_t)) == SUCCESS) {		//manda il messaggio
+				printf("packet sent to node 2, with nodeID =%d.\n", msg->nodeID);
+				locked = TRUE; 
+				}
+			}	
+    		if (pat1[for2] == 5 || pat1[for2] == 6 || pat1[for2] == 7){
+    		smart_light_msg_t* msg = (smart_light_msg_t*)(call Packet.getPayload(&packet, sizeof(smart_light_msg_t)));
+  			msg->nodeID = pat1[for2]; //dai alla variabile nodeID nel paylod il valore del pat
+  			msg->flag_led = 1;		//messaggio di tipo accendi
+  				if (call AMSend.send(5, &packet, sizeof(smart_light_msg_t)) == SUCCESS) {		//manda il messaggio
+				printf("packet sent to node 5, with nodeID =%d.\n", msg->nodeID);
+				locked = TRUE; 
+				}
+			}	
+	    	if (pat1[for2] == 8 || pat1[for2] == 9 || pat1[for2] == 10){
+	    	smart_light_msg_t* msg = (smart_light_msg_t*)(call Packet.getPayload(&packet, sizeof(smart_light_msg_t)));
+  			msg->nodeID = pat1[for2]; //dai alla variabile nodeID nel paylod il valore del pat
+  			msg->flag_led = 1;		//messaggio di tipo accendi
+  				if (call AMSend.send(8, &packet, sizeof(smart_light_msg_t)) == SUCCESS) {		//manda il messaggio
+				printf("packet sent to node 8, with nodeID =%d.\n", msg->nodeID);
+				locked = TRUE; 
+				}
+			}
+		if(for2 == 4){
+		    for2=-1;
+			call MilliTimer3.stop();
+		}
+	for2++;
+    }
+  }
+  
+  event void MilliTimer4.fired(){
+  printf("timer4 fired\n");
+  //do nothing
+  }
+   
+  //********Receive Event Interface********//
   event message_t* Receive.receive(message_t* bufPtr, void* payload, uint8_t len) {
-  	smart_light_msg_t* msg = (smart_light_msg_t*)(call Packet.getPayload(&packet, sizeof(smart_light_msg_t)));
-    dbg("SmartLightC", "Received packet from node %hhu.\n", call AMPacket.source (&packet));
+  	smart_light_msg_t* msg = (smart_light_msg_t*)payload;
+    printf("Received function: at node %d with nodeID %d\n", TOS_NODE_ID, msg->nodeID);   
     if (len != sizeof(smart_light_msg_t)) {return bufPtr;}
     else {
-    	if (TOS_NODE_ID == msg->nodeID){
-    		dbg("SmartLightC", "SmartLightC: packet recived at node %hhu, at time %s \n", TOS_NODE_ID, sim_time_string());
-    		dbg_clear ("Pkg",">>>Pack \n \t Payload length %hhu \n", call Packet.payloadLength (&packet));
-    	    dbg_clear ("Pkg","\t Source: %hhu \n", call AMPacket.source (&packet));
-       		dbg_clear ("Pkg","\t Destination: %hhu \n", call AMPacket.destination (&packet));
-        	dbg_clear ("Pkg","\t\t Payload \n");
-        	dbg_clear ("Pkg","\t\t node_id:  %hhu \n", msg->nodeID);
-        	dbg_clear ("Pkg","\t\t flag_led: %hhu \n", msg->flag_led);
-        	dbg_clear ("Pkg","\n");
-        	if (msg->nodeID == 2 && msg->flag_led == 1) { call Leds.led0On(); }	//se il messaggio è diretto a me e la flag è 1 accendi il led
-        	if (msg->nodeID == 3 && msg->flag_led == 1) { call Leds.led1On(); }
-        	if (msg->nodeID == 4 && msg->flag_led == 1) { call Leds.led2On(); }
-        	if (msg->nodeID == 5 && msg->flag_led == 1) { call Leds.led3On(); }
-        	if (msg->nodeID == 6 && msg->flag_led == 1) { call Leds.led4On(); }
-        	if (msg->nodeID == 7 && msg->flag_led == 1) { call Leds.led5On(); }
-        	if (msg->nodeID == 8 && msg->flag_led == 1) { call Leds.led6On(); }
-        	if (msg->nodeID == 9 && msg->flag_led == 1) { call Leds.led7On(); }
-        	if (msg->nodeID == 10 && msg->flag_led == 1) { call Leds.led8On(); }
-        	if (msg->nodeID == 2 && msg->flag_led == 0) { call Leds.led0Off(); }	//se il messaggio è diretto a me e la flag è 0 spegni il led
-        	if (msg->nodeID == 3 && msg->flag_led == 0) { call Leds.led1Off(); }
-        	if (msg->nodeID == 4 && msg->flag_led == 0) { call Leds.led2Off(); }
-        	if (msg->nodeID == 5 && msg->flag_led == 0) { call Leds.led3Off(); }
-        	if (msg->nodeID == 6 && msg->flag_led == 0) { call Leds.led4Off(); }
-        	if (msg->nodeID == 7 && msg->flag_led == 0) { call Leds.led5Off(); }
-        	if (msg->nodeID == 8 && msg->flag_led == 0) { call Leds.led6Off(); }
-        	if (msg->nodeID == 9 && msg->flag_led == 0) { call Leds.led7Off(); }
-        	if (msg->nodeID == 10 && msg->flag_led == 0) { call Leds.led8Off(); }
+    	if (msg->nodeID == TOS_NODE_ID){
+    		printf("nodeID=TOS_NODE_ID: packet recived at node %d\n", TOS_NODE_ID);
+    		printf("Payload length %d\n", call Packet.payloadLength(&packet));
+        	printf("Payload \n");
+        	printf("node_id:  %d \n", msg->nodeID);
+        	printf("flag_led: %d \n", msg->flag_led);
+        	if (msg->flag_led == 1){call Leds.led0On();}
+        	if (msg->flag_led == 0){call Leds.led0Off();}
+        	locked = FALSE;
          }
-         if (TOS_NODE_ID > msg->nodeID){
-         	if (call AMSend.send(TOS_NODE_ID+1, &packet, sizeof(smart_light_msg_t)) == SUCCESS) {		//manda il messaggio
-				dbg("SmartLightC", "SmartLightC: packet sent to node %hhu.\n", call AMPacket.destination (&packet));
-				locked = TRUE; }
+         if (msg->nodeID != TOS_NODE_ID) {
+         		printf("call forward function\n");
+         		forward(msg->nodeID, msg->flag_led);
+				
          }
     }
   }
   
-//***********************Senddone Event Interface*************************//
+  //********Senddone Event Interface********//
   event void AMSend.sendDone(message_t* bufPtr, error_t error) {
     if (&packet == bufPtr) {
     locked = FALSE;
-    	  dbg("radio_send", "Packet sent...");
-		  dbg_clear("radio_send", " at time %s \n", sim_time_string());
+    	call MilliTimer4.startOneShot(1000);
+    	printf("Packet sent...");
 	}
       else{
-      dbgerror("radio_send", "Send done error!");
-      
+      printf("Send done error!"); 
     }
+  }
+  
+  
   }
