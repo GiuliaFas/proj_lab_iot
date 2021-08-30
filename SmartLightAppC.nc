@@ -11,22 +11,18 @@ implementation {
   components new TimerMilliC() as MilliTimer1;
   components new TimerMilliC() as MilliTimer2;
   components new TimerMilliC() as MilliTimer3;
-  components new TimerMilliC() as MilliTimer4;
   components ActiveMessageC;
   components SerialPrintfC;
-
   
   App.Boot -> MainC.Boot;
-  
   App.Receive -> AMReceiverC;
   App.AMSend -> AMSenderC;
   App.AMControl -> ActiveMessageC;
   App.Leds -> LedsC;
   App.AMPacket -> AMSenderC;
   App.Packet -> AMSenderC;
-  //timers
+  //***timers***//
   App.MilliTimer1 -> MilliTimer1;
   App.MilliTimer2 -> MilliTimer2;
   App.MilliTimer3 -> MilliTimer3;
-  App.MilliTimer4 -> MilliTimer4;
 }
